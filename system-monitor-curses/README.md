@@ -1,0 +1,29 @@
+# System Monitor (Curses)
+
+This script is used to monitor the system resources of the machine.
+
+## Usage
+
+1. Create a virtual environment
+
+```bash
+python -m venv venv
+```
+
+2. Activate the virtual environment
+
+```bash
+source venv/bin/activate # On Windows: venv\Scripts\activate
+```
+
+3. Check for requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Run the script
+
+```bash
+python curses_monitor.py
+```
