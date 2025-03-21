@@ -204,7 +204,17 @@ class MonitoringApp:
 
         self.monitor = SystemMonitor()
         self.monitoring_thread = None
-        self.interface_frames = []  # Initialize the list to store interface frames
+        self.interface_frames = []
+
+        # Get system info once at startup
+        self.system_info = {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "hostname": platform.node()
+        }
 
         self.setup_ui()
 
@@ -217,60 +227,86 @@ class MonitoringApp:
         self.graphs_frame = ctk.CTkFrame(self.app)
         self.graphs_frame.pack(side="right", fill="both", padx=10, pady=10, expand=True)
 
-        # Create a scrollable frame for interfaces
-        self.interfaces_frame = ctk.CTkScrollableFrame(
-            self.control_frame, label_text="Network Interfaces", height=500
-        )
-        self.interfaces_frame.pack(fill="both", expand=True, pady=10)
+        # Add system info section
+        self.system_info_frame = ctk.CTkFrame(self.control_frame)
+        self.system_info_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(self.system_info_frame, text="System Information", font=("Arial", 16, "bold")).pack(pady=5)
+        
+        info_text = f"OS: {self.system_info['system']} {self.system_info['release']}\n"
+        info_text += f"Hostname: {self.system_info['hostname']}\n"
+        info_text += f"Architecture: {self.system_info['machine']}\n"
+        info_text += f"Processor: {self.system_info['processor']}"
+        
+        system_info_label = ctk.CTkLabel(self.system_info_frame, text=info_text, justify="left")
+        system_info_label.pack(padx=10, pady=5)
 
+        # Create control section
+        control_section = ctk.CTkFrame(self.control_frame)
+        control_section.pack(fill="x", padx=5, pady=5)
+        
+        self.start_button = ctk.CTkButton(
+            control_section, 
+            text="Start Monitoring", 
+            command=self.toggle_monitoring
+        )
+        self.start_button.pack(pady=5)
+        
         self.update_interfaces_button = ctk.CTkButton(
-            self.control_frame, text="Update Interfaces", command=self.update_interfaces
+            control_section, 
+            text="Update Interfaces", 
+            command=self.update_interfaces
         )
         self.update_interfaces_button.pack(pady=5)
 
-        # Move start button before checkbox
-        self.start_button = ctk.CTkButton(
-            self.control_frame, text="Start Monitoring", command=self.toggle_monitoring
-        )
-        self.start_button.pack(pady=10)
-
-        # Move checkbox after buttons
         self.log_var = ctk.BooleanVar(value=False)
         self.log_checkbox = ctk.CTkCheckBox(
-            self.control_frame, text="Log to log.txt", variable=self.log_var
+            control_section, 
+            text="Log to log.txt", 
+            variable=self.log_var
         )
-        self.log_checkbox.pack(pady=(0, 10))
+        self.log_checkbox.pack(pady=5)
 
-        # Setup graphs
+        # Create interfaces section
+        self.interfaces_frame = ctk.CTkScrollableFrame(
+            self.control_frame, 
+            label_text="Network Interfaces",
+            height=400
+        )
+        self.interfaces_frame.pack(fill="both", expand=True, pady=10)
+
         self.setup_graphs()
 
     def setup_graphs(self):
         self.figure, (self.ax1, self.ax2, self.ax3) = plt.subplots(
             3, 1, figsize=(8, 6), height_ratios=[1, 1, 1]
         )
-        # Add spacing between subplots
         self.figure.subplots_adjust(hspace=0.4)
         self.figure.set_facecolor("#2b2b2b")
 
+        # Common graph settings
+        for ax in [self.ax1, self.ax2, self.ax3]:
+            ax.set_facecolor("#2b2b2b")
+            ax.tick_params(colors="white", labelsize=8)
+            ax.grid(True, color="gray", alpha=0.3, linestyle='--')
+            ax.spines['bottom'].set_color('white')
+            ax.spines['top'].set_color('white')
+            ax.spines['left'].set_color('white')
+            ax.spines['right'].set_color('white')
+
         # CPU Usage
-        self.ax1.set_facecolor("#2b2b2b")
-        self.ax1.set_title("CPU Usage %", color="white")
+        self.ax1.set_title("CPU Usage %", color="white", pad=10, fontsize=10)
         self.ax1.set_ylim(0, 100)
-        self.ax1.grid(True, color="gray")
-        self.ax1.tick_params(colors="white")
+        self.ax1.set_xlabel("Time (s)", color="white", fontsize=8)
 
         # Memory Usage
-        self.ax2.set_facecolor("#2b2b2b")
-        self.ax2.set_title("Memory Usage %", color="white")
+        self.ax2.set_title("Memory Usage %", color="white", pad=10, fontsize=10)
         self.ax2.set_ylim(0, 100)
-        self.ax2.grid(True, color="gray")
-        self.ax2.tick_params(colors="white")
+        self.ax2.set_xlabel("Time (s)", color="white", fontsize=8)
 
         # Network Usage
-        self.ax3.set_facecolor("#2b2b2b")
-        self.ax3.set_title("Network Usage (MB/s)", color="white")
-        self.ax3.grid(True, color="gray")
-        self.ax3.tick_params(colors="white")
+        self.ax3.set_title("Network Usage (MB/s)", color="white", pad=10, fontsize=10)
+        self.ax3.set_xlabel("Time (s)", color="white", fontsize=8)
 
         self.canvas = FigureCanvasTkAgg(self.figure, self.graphs_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -279,33 +315,50 @@ class MonitoringApp:
         if not self.monitor.running:
             return
 
+        time_points = list(range(len(self.monitor.cpu_history)))
+
         self.ax1.clear()
         self.ax2.clear()
         self.ax3.clear()
 
-        # Update CPU graph
-        self.ax1.plot(list(self.monitor.cpu_history), color="#00ff00")
-        self.ax1.set_title("CPU Usage %", color="white")
+        # Update CPU graph with enhanced visuals
+        self.ax1.plot(time_points, list(self.monitor.cpu_history), color="#00ff00", linewidth=2)
+        self.ax1.fill_between(time_points, list(self.monitor.cpu_history), alpha=0.2, color="#00ff00")
+        self.ax1.set_title("CPU Usage %", color="white", pad=10, fontsize=10)
         self.ax1.set_ylim(0, 100)
-        self.ax1.grid(True, color="gray")
+        self.ax1.grid(True, color="gray", alpha=0.3, linestyle='--')
         self.ax1.tick_params(colors="white")
 
-        # Update Memory graph
-        self.ax2.plot(list(self.monitor.memory_history), color="#00ff00")
-        self.ax2.set_title("Memory Usage %", color="white")
+        # Update Memory graph with enhanced visuals
+        self.ax2.plot(time_points, list(self.monitor.memory_history), color="#00ff00", linewidth=2)
+        self.ax2.fill_between(time_points, list(self.monitor.memory_history), alpha=0.2, color="#00ff00")
+        self.ax2.set_title("Memory Usage %", color="white", pad=10, fontsize=10)
         self.ax2.set_ylim(0, 100)
-        self.ax2.grid(True, color="gray")
+        self.ax2.grid(True, color="gray", alpha=0.3, linestyle='--')
         self.ax2.tick_params(colors="white")
 
-        # Update Network graph
+        # Update Network graph with enhanced visuals
         recv_mb = [x / 1024 / 1024 for x in self.monitor.network_recv_history]
         send_mb = [x / 1024 / 1024 for x in self.monitor.network_send_history]
-        self.ax3.plot(recv_mb, color="#00ff00", label="Download")
-        self.ax3.plot(send_mb, color="#ff0000", label="Upload")
-        self.ax3.set_title("Network Usage (MB/s)", color="white")
-        self.ax3.grid(True, color="gray")
+        
+        self.ax3.plot(time_points, recv_mb, color="#00ff00", label="Download", linewidth=2)
+        self.ax3.plot(time_points, send_mb, color="#ff0000", label="Upload", linewidth=2)
+        self.ax3.fill_between(time_points, recv_mb, alpha=0.2, color="#00ff00")
+        self.ax3.fill_between(time_points, send_mb, alpha=0.2, color="#ff0000")
+        self.ax3.set_title("Network Usage (MB/s)", color="white", pad=10, fontsize=10)
+        self.ax3.grid(True, color="gray", alpha=0.3, linestyle='--')
         self.ax3.tick_params(colors="white")
-        self.ax3.legend()
+        self.ax3.legend(loc='upper right', facecolor="#2b2b2b", labelcolor="white")
+
+        # Apply common settings to all axes
+        for ax in [self.ax1, self.ax2, self.ax3]:
+            ax.set_facecolor("#2b2b2b")
+            ax.tick_params(colors="white", labelsize=8)
+            ax.set_xlabel("Time (s)", color="white", fontsize=8)
+            ax.spines['bottom'].set_color('white')
+            ax.spines['top'].set_color('white')
+            ax.spines['left'].set_color('white')
+            ax.spines['right'].set_color('white')
 
         self.canvas.draw()
 
