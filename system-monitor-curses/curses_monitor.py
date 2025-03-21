@@ -126,89 +126,112 @@ class SystemMonitor:
         self.draw_progress_bar(y + 5, x + 2, 30, swap.percent)
 
     def draw_disk_info(self, y, x):
+        """Updated disk information display"""
+        self.draw_box(y, x, 6, 35, "Disk Usage")
         disk = psutil.disk_usage("/")
-        self.safe_addstr(y, x, "Disk Usage:", curses.color_pair(3) | curses.A_BOLD)
+        
         self.safe_addstr(y + 1, x + 2, f"Total: {get_size(disk.total)}")
-        self.safe_addstr(y + 2, x + 2, f"Used: {get_size(disk.used)} ({disk.percent}%)")
-        self.safe_addstr(y + 3, x + 2, f"Free: {get_size(disk.free)}")
+        self.safe_addstr(y + 2, x + 2, f"Used: {get_size(disk.used)}")
+        self.draw_progress_bar(y + 3, x + 2, 30, disk.percent)
+        self.safe_addstr(y + 4, x + 2, f"Free: {get_size(disk.free)}")
 
     def draw_network_info(self, y, x):
+        """Updated network information display"""
+        self.draw_box(y, x, 6, 35, "Network I/O")
         net_io = psutil.net_io_counters()
-        self.safe_addstr(y, x, "Network:", curses.color_pair(4) | curses.A_BOLD)
-        self.safe_addstr(y + 1, x + 2, f"Bytes Sent: {get_size(net_io.bytes_sent)}")
-        self.safe_addstr(y + 2, x + 2, f"Bytes Recv: {get_size(net_io.bytes_recv)}")
+        
+        # Calculate speeds (simplified version)
+        self.safe_addstr(y + 1, x + 2, f"↑ {get_size(net_io.bytes_sent)}")
+        self.safe_addstr(y + 2, x + 2, f"↓ {get_size(net_io.bytes_recv)}")
+        
+        # Add packet information
+        self.safe_addstr(y + 3, x + 2, f"Packets sent: {net_io.packets_sent}")
+        self.safe_addstr(y + 4, x + 2, f"Packets recv: {net_io.packets_recv}")
 
     def draw_processes(self, y, x):
-        height, _ = self.stdscr.getmaxyx()
-        max_processes = min(5, height - y - 1)
-        if max_processes <= 0:
-            return
-
-        self.safe_addstr(y, x, "Top Processes:", curses.color_pair(5) | curses.A_BOLD)
+        """Updated process information display"""
+        self.draw_box(y, x, 8, 76, "Top Processes")
         processes = []
-        for proc in psutil.process_iter(
-            ["pid", "name", "cpu_percent", "memory_percent"]
-        ):
+        for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
             try:
                 processes.append(proc.info)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
 
         processes.sort(key=lambda x: x["cpu_percent"], reverse=True)
-
-        for i, proc in enumerate(processes[:max_processes]):
-            process_text = (
-                f"{proc['name'][:15]:<15} "
-                f"PID: {proc['pid']:<6} "
-                f"CPU: {proc['cpu_percent']:>5.1f}% "
-                f"MEM: {proc['memory_percent']:>5.1f}%"
-            )
-            self.safe_addstr(y + i + 1, x + 2, process_text)
+        
+        # Header
+        self.safe_addstr(y + 1, x + 2, "Name".ljust(20) + "PID".ljust(8) + 
+                        "CPU%".rjust(7) + "MEM%".rjust(7), curses.A_BOLD)
+        
+        # Process list
+        for i, proc in enumerate(processes[:5]):
+            name = proc['name'][:19].ljust(20)
+            pid = str(proc['pid']).ljust(8)
+            cpu = f"{proc['cpu_percent']:>6.1f}%"
+            mem = f"{proc['memory_percent']:>6.1f}%"
+            
+            color = curses.color_pair(1)  # Default green
+            if proc['cpu_percent'] > 50:
+                color = curses.color_pair(2)  # Red for high CPU
+            elif proc['cpu_percent'] > 20:
+                color = curses.color_pair(3)  # Yellow for medium CPU
+                
+            self.safe_addstr(y + i + 2, x + 2, 
+                           f"{name}{pid}{cpu}{mem}", color)
 
     def draw_battery_info(self, y, x):
-        """Draw battery information if available"""
+        """Updated battery information display"""
         if hasattr(psutil, "sensors_battery"):
             battery = psutil.sensors_battery()
             if battery:
-                self.safe_addstr(y, x, "Battery:", curses.color_pair(5) | curses.A_BOLD)
-                self.safe_addstr(y + 1, x + 2, f"Charge: {battery.percent}%")
-                if battery.power_plugged:
-                    self.safe_addstr(y + 2, x + 2, "Status: Plugged In")
-                else:
-                    remain = battery.secsleft
-                    if remain != -1:
-                        hours = remain // 3600
-                        minutes = (remain % 3600) // 60
-                        self.safe_addstr(y + 2, x + 2, f"Time left: {hours}h {minutes}m")
-                    
+                self.draw_box(y, x, 5, 35, "Battery Status")
+                self.safe_addstr(y + 1, x + 2, 
+                    f"Charge: {battery.percent:>3}%")
+                self.draw_progress_bar(y + 2, x + 2, 30, battery.percent)
+                
+                status = "Plugged In" if battery.power_plugged else "On Battery"
+                if not battery.power_plugged and battery.secsleft != -1:
+                    hours = battery.secsleft // 3600
+                    minutes = (battery.secsleft % 3600) // 60
+                    status = f"{status} ({hours}h {minutes}m left)"
+                self.safe_addstr(y + 3, x + 2, status)
+
     def draw_temperature_info(self, y, x):
-        """Draw temperature information if available"""
+        """Updated temperature information display"""
         if hasattr(psutil, "sensors_temperatures"):
             temps = psutil.sensors_temperatures()
             if temps:
-                self.safe_addstr(y, x, "Temperatures:", curses.color_pair(2) | curses.A_BOLD)
+                self.draw_box(y, x, 6, 35, "Temperature Sensors")
                 row = 1
                 for name, entries in temps.items():
                     for entry in entries:
-                        if row > 3: break  # Limit to 3 sensors
+                        if row > 4: break
+                        temp = entry.current
+                        color = curses.color_pair(1)  # Green for normal
+                        if temp > 80:
+                            color = curses.color_pair(2)  # Red for hot
+                        elif temp > 60:
+                            color = curses.color_pair(3)  # Yellow for warm
+                            
                         self.safe_addstr(y + row, x + 2, 
-                            f"{name[:10]}: {entry.current:.1f}°C")
+                            f"{name[:12]}: {temp:>5.1f}°C", color)
                         row += 1
 
     def draw_system_info(self, y, x):
         """Draw system uptime and load"""
+        self.draw_box(y, x, 4, 35, "System Info")
         boot_time = datetime.fromtimestamp(psutil.boot_time())
         uptime = datetime.now() - boot_time
         days = uptime.days
         hours = uptime.seconds // 3600
         minutes = (uptime.seconds % 3600) // 60
 
-        self.safe_addstr(y, x, "System Info:", curses.color_pair(1) | curses.A_BOLD)
         self.safe_addstr(y + 1, x + 2, f"Uptime: {days}d {hours}h {minutes}m")
         
         try:
             load1, load5, load15 = psutil.getloadavg()
-            self.safe_addstr(y + 2, x + 2, f"Load avg: {load1:.1f}, {load5:.1f}, {load15:.1f}")
+            self.safe_addstr(y + 2, x + 2, f"Load: {load1:.1f}, {load5:.1f}, {load15:.1f}")
         except AttributeError:
             pass
 
@@ -237,16 +260,16 @@ class SystemMonitor:
 
                 self.stdscr.clear()
 
-                # Draw all components
+                # Updated layout positioning
                 self.draw_header(0, 0)
                 self.draw_system_info(3, 0)
                 self.draw_cpu_info(7, 0)
                 self.draw_memory_info(7, 40)
                 self.draw_disk_info(14, 0)
                 self.draw_network_info(14, 40)
-                self.draw_battery_info(21, 0)
-                self.draw_temperature_info(21, 40)
-                self.draw_processes(28, 0)
+                self.draw_battery_info(20, 0)
+                self.draw_temperature_info(20, 40)
+                self.draw_processes(25, 0)
 
                 self.stdscr.refresh()
 
