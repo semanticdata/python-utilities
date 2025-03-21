@@ -27,6 +27,12 @@ class SystemMonitor:
         self.stdscr.nodelay(1)  # Make getch() non-blocking
         self.min_height = 12
         self.min_width = 40
+        # Add box drawing constants
+        self.box_chars = {
+            'tl': '╔', 'tr': '╗', 'bl': '╚', 'br': '╝',
+            'h': '═', 'v': '║',
+            'ttee': '╤', 'btee': '╧', 'ltee': '╟', 'rtee': '╢'
+        }
 
     def init_colors(self):
         curses.start_color()
@@ -49,32 +55,75 @@ class SystemMonitor:
             except curses.error:
                 pass  # Ignore errors from writing to bottom-right corner
 
+    def draw_box(self, y, x, height, width, title=""):
+        """Draw a box with optional title"""
+        # Draw corners
+        self.safe_addstr(y, x, self.box_chars['tl'])
+        self.safe_addstr(y, x + width - 1, self.box_chars['tr'])
+        self.safe_addstr(y + height - 1, x, self.box_chars['bl'])
+        self.safe_addstr(y + height - 1, x + width - 1, self.box_chars['br'])
+        
+        # Draw horizontal lines
+        for i in range(1, width - 1):
+            self.safe_addstr(y, x + i, self.box_chars['h'])
+            self.safe_addstr(y + height - 1, x + i, self.box_chars['h'])
+        
+        # Draw vertical lines
+        for i in range(1, height - 1):
+            self.safe_addstr(y + i, x, self.box_chars['v'])
+            self.safe_addstr(y + i, x + width - 1, self.box_chars['v'])
+        
+        # Draw title if provided
+        if title:
+            self.safe_addstr(y, x + 2, f" {title} ")
+
+    def draw_progress_bar(self, y, x, width, percentage, color_pair=0):
+        """Draw a progress bar with percentage"""
+        filled = int((width - 2) * percentage / 100)
+        self.safe_addstr(y, x, "[")
+        
+        # Choose color based on percentage
+        if percentage >= 80:
+            color = 2  # Red for high usage
+        elif percentage >= 60:
+            color = 3  # Yellow for medium usage
+        else:
+            color = 1  # Green for low usage
+            
+        self.safe_addstr(y, x + 1, "█" * filled, curses.color_pair(color))
+        self.safe_addstr(y, x + 1 + filled, " " * (width - 2 - filled))
+        self.safe_addstr(y, x + width - 1, "]")
+
     def draw_header(self, y, x):
+        """Updated header with double-line box"""
+        width = 76  # Total width of the interface
+        self.draw_box(y, x, 3, width, "System Monitor")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.safe_addstr(y, x, f"System Monitor - {now}", curses.A_BOLD)
-        self.safe_addstr(y + 1, x, "Press 'q' to quit", curses.A_DIM)
+        self.safe_addstr(y + 1, x + 2, f"Press 'q' to quit | {now}", curses.A_DIM)
 
     def draw_cpu_info(self, y, x):
-        # CPU information
+        """Updated CPU information display"""
+        self.draw_box(y, x, 7, 35, "CPU Usage")
         cpu_percent = psutil.cpu_percent()
-        self.safe_addstr(y, x, "CPU Usage:", curses.color_pair(1) | curses.A_BOLD)
-        self.safe_addstr(y, x + 15, f"{cpu_percent}%")
-
-        # Per-core CPU usage
+        self.safe_addstr(y + 1, x + 2, f"Total: {cpu_percent:>5.1f}%")
+        self.draw_progress_bar(y + 2, x + 2, 30, cpu_percent)
+        
         cpu_percents = psutil.cpu_percent(percpu=True)
-        height, _ = self.stdscr.getmaxyx()
-        max_cores = height - y - 3  # Leave some space for other sections
-        for i, percent in enumerate(cpu_percents[:max_cores]):
-            self.safe_addstr(y + i + 1, x + 2, f"Core {i}: {percent}%")
+        for i, percent in enumerate(cpu_percents[:3]):  # Show first 3 cores
+            self.safe_addstr(y + 3 + i, x + 2, f"Core {i:>2}: {percent:>5.1f}%")
+            self.draw_progress_bar(y + 3 + i, x + 11, 21, percent)
 
     def draw_memory_info(self, y, x):
+        """Updated memory information display"""
+        self.draw_box(y, x, 7, 35, "Memory Usage")
         memory = psutil.virtual_memory()
-        self.safe_addstr(y, x, "Memory Usage:", curses.color_pair(2) | curses.A_BOLD)
-        self.safe_addstr(y + 1, x + 2, f"Total: {get_size(memory.total)}")
-        self.safe_addstr(
-            y + 2, x + 2, f"Used: {get_size(memory.used)} ({memory.percent}%)"
-        )
-        self.safe_addstr(y + 3, x + 2, f"Free: {get_size(memory.free)}")
+        swap = psutil.swap_memory()
+        
+        self.safe_addstr(y + 1, x + 2, f"RAM: {get_size(memory.used)}/{get_size(memory.total)}")
+        self.draw_progress_bar(y + 2, x + 2, 30, memory.percent)
+        
+        self.safe_addstr(y + 4, x + 2, f"Swap: {get_size(swap.used)}/{get_size(swap.total)}")
+        self.draw_progress_bar(y + 5, x + 2, 30, swap.percent)
 
     def draw_disk_info(self, y, x):
         disk = psutil.disk_usage("/")
@@ -116,6 +165,53 @@ class SystemMonitor:
             )
             self.safe_addstr(y + i + 1, x + 2, process_text)
 
+    def draw_battery_info(self, y, x):
+        """Draw battery information if available"""
+        if hasattr(psutil, "sensors_battery"):
+            battery = psutil.sensors_battery()
+            if battery:
+                self.safe_addstr(y, x, "Battery:", curses.color_pair(5) | curses.A_BOLD)
+                self.safe_addstr(y + 1, x + 2, f"Charge: {battery.percent}%")
+                if battery.power_plugged:
+                    self.safe_addstr(y + 2, x + 2, "Status: Plugged In")
+                else:
+                    remain = battery.secsleft
+                    if remain != -1:
+                        hours = remain // 3600
+                        minutes = (remain % 3600) // 60
+                        self.safe_addstr(y + 2, x + 2, f"Time left: {hours}h {minutes}m")
+                    
+    def draw_temperature_info(self, y, x):
+        """Draw temperature information if available"""
+        if hasattr(psutil, "sensors_temperatures"):
+            temps = psutil.sensors_temperatures()
+            if temps:
+                self.safe_addstr(y, x, "Temperatures:", curses.color_pair(2) | curses.A_BOLD)
+                row = 1
+                for name, entries in temps.items():
+                    for entry in entries:
+                        if row > 3: break  # Limit to 3 sensors
+                        self.safe_addstr(y + row, x + 2, 
+                            f"{name[:10]}: {entry.current:.1f}°C")
+                        row += 1
+
+    def draw_system_info(self, y, x):
+        """Draw system uptime and load"""
+        boot_time = datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.now() - boot_time
+        days = uptime.days
+        hours = uptime.seconds // 3600
+        minutes = (uptime.seconds % 3600) // 60
+
+        self.safe_addstr(y, x, "System Info:", curses.color_pair(1) | curses.A_BOLD)
+        self.safe_addstr(y + 1, x + 2, f"Uptime: {days}d {hours}h {minutes}m")
+        
+        try:
+            load1, load5, load15 = psutil.getloadavg()
+            self.safe_addstr(y + 2, x + 2, f"Load avg: {load1:.1f}, {load5:.1f}, {load15:.1f}")
+        except AttributeError:
+            pass
+
     def check_terminal_size(self):
         """Check if terminal meets minimum size requirements"""
         height, width = self.stdscr.getmaxyx()
@@ -143,11 +239,14 @@ class SystemMonitor:
 
                 # Draw all components
                 self.draw_header(0, 0)
-                self.draw_cpu_info(3, 0)
-                self.draw_memory_info(3, 40)
-                self.draw_disk_info(8, 40)
-                self.draw_network_info(13, 40)
-                self.draw_processes(12, 0)
+                self.draw_system_info(3, 0)
+                self.draw_cpu_info(7, 0)
+                self.draw_memory_info(7, 40)
+                self.draw_disk_info(14, 0)
+                self.draw_network_info(14, 40)
+                self.draw_battery_info(21, 0)
+                self.draw_temperature_info(21, 40)
+                self.draw_processes(28, 0)
 
                 self.stdscr.refresh()
 
